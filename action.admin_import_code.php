@@ -66,7 +66,7 @@ for( $i = 0; $i < count($all_data); $i++ ) {
     switch( $row['type'] ) {
     case 'module_template':
         $obj = cge_utils::get_module($row['module']);
-        if( !is_object($obj) ) continue;
+        if( !is_object($obj) ) continue 2;
         if( cgcu_utils::module_template_exists($row['module'],$row['name']) ) {
             $row['new_name'] = cgcu_utils::module_template_newname($row['module'],$row['name']);
         }

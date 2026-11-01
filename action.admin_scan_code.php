@@ -89,7 +89,7 @@ for( $i = 0; $i < count($all_data); $i++ ) {
         $obj = cge_utils::get_module($row['module']);
         if( !is_object($obj) ) {
             $row['available'] = 0;
-            continue;
+            continue 2;
         }
         if( cgcu_utils::module_template_exists($row['module'],$row['name']) ) {
             $row['new_name'] = cgcu_utils::module_template_newname($row['module'],$row['name']);
