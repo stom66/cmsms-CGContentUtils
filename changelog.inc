@@ -121,4 +121,8 @@
 	<p>Remove the import/export code functionality.</p>
 	<p>API Documentation.</p>
   </li>
+  <li>2.5.6
+	<p>Fork release by stom66.</p>
+	<p>Fixed continue statements inside switch blocks for PHP 8.</p>
+  </li>
 </ul>

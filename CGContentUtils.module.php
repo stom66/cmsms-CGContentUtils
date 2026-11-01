@@ -95,7 +95,7 @@ class CGContentUtils extends CGExtensions
     /**
      * @ignore
      */
-    function GetVersion() { return '2.5.5'; }
+    function GetVersion() { return '2.5.6'; }
 
     /**
      * @ignore
