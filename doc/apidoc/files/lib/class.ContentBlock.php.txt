@@ -1,0 +1,287 @@
+<?php
+
+/**
+ * A class to describe a single content block for use in page templates.
+ *
+ * @package CGContentUtils
+ * @author Robert Campbell <calguy1000@gmail.com>
+ * @license GPL
+ */
+
+declare(strict_types = 1);
+namespace CGContentUtils;
+use cge_array;
+
+/**
+ * A class to describe a single content block for use in page templates.
+ * Instances of this class are immutable.
+ *
+ * Acceptable Attributes by block type:
+ * <ul>
+ *   <li><code>textinput</code>
+ *       <ul>
+ *           <li>length - (int) The size of the text area.</li>
+ *           <li>maxlength - (int) The maximum amount of text permitted.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>date</code>
+ *       <ul>
+ *           <li>min - (string) The minimum date</li>
+ *           <li>max - (string) The maximum date</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>number</code>
+ *       <ul>
+ *           <li>min - (float) The minimum number</li>
+ *           <li>max - (float) The maximum number</li>
+ *           <li>step - (float) The amount to step between min and max.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>textarea</code>
+ *       <ul>
+ *           <li>rows - (int) The number of rows in the textarea.</li>
+ *           <li>cols - (int) The number of columns in the textarea.</li>
+ *           <li>wysiwyg - (bool) Whether to allow the WYSIWYG in this textarea.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>statictext</code>
+ *       <ul>
+ *           <li>fieldtext - (string) The static text to display.  HTML is not permitted.  Newlines will be substituted with <br/></li>
+ *       </ul>
+ *   </li>
+ *   <li><code>dropdown</code>
+ *       <ul>
+ *           <li>dropdown - (string) Text to define the options for the dropdown.  One option per line.  Values and labels should be separated by a | character.
+ *               A smarty template is permitted.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>dropdown_udt</code>
+ *       <ul>
+ *           <li>udt - (string) The name of a UDT/simple_plugin to use for generating the options.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>gcb_selector</code>
+ *       <ul>
+ *           <li>gcb_prefix - (string) A prefix to use for filtering GCB's.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>multiselect</code>
+ *       <ul>
+ *           <li>options - (string) Text to define the options for the dropdown.  One option per line.  Values and labels should be separated by a | character.
+ *               A smarty template is permitted.</li>
+ *           <li>storagedelimiter - (string)</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>sortable_list</code>
+ *       <ul>
+ *           <li>options - (string) Text to define the options for the dropdown.  One option per line.  Values and labels should be separated by a | character.
+ *               A smarty template is permitted.</li>
+ *           <li>sortable_maxitems - (int) The maxiumum number of items that can be selected.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>checkbox</code>
+ *       <ul>
+ *           <li>value - (string) The value for the checkbox.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>radiobuttons</code>
+ *       <ul>
+ *           <li>options - (string) Text to define the options for the dropdown.  One option per line.  Values and labels should be separated by a | character.
+ *               A smarty template is permitted.</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>file_selector</code>
+ *       <ul>
+ *           <li>dir - (string) The name of a directory (relative to the CMSMS uploads direcotry) to read files from.</li>
+ *           <li>excludeprefix - (string) Optionally exclude files or paths with this prefix.</li>
+ *           <li>filetypes - (string)</li>
+ *           <li>recurse - (bool) Optionally recurse into sub directories.</li>
+ *           <li>sortfiles - (bool) Sort files by their natural name</li>
+ *       </ul>
+ *   </li>
+ *   <li><code>advpageselector</code>
+ *       <ul>
+ *           <li>adv_start - (int) The page id of the start page.</li>
+ *           <li>adv_navhidden - (bool) Whether or not to include pages that are hidden from the navigation.</li>
+ *       </ul>
+ *   </li>
+ * </ul>
+ *
+ * @property-read int $id The unique block id.
+ * @property-read string $type The block type
+ * @property-read string $name The unique block name
+ * @property-read string $prompt A required prompt for the block.
+ * @property-read array $attribs An associative array of attributes for this block.
+ * @property-read string $value
+ */
+class ContentBlock
+{
+    /**
+     * A constant list of the known block types.
+     */
+    const types = [
+        'textinput', 'textarea', 'date', 'number', 'statictext', 'dropdown', 'dropdown_udt', 'gcb_selector', 'multiselect',
+        'sortable_list',
+        'checkbox', 'radiobuttons', 'file_selector', 'pageselector', 'advpageselector'
+        ];
+
+    /**
+     * @ignore
+     */
+    private $_data = [ 'id'=>null, 'type'=>null, 'name'=>null, 'prompt'=>null, 'value'=>null,
+                       'attribs'=>null ];
+
+    /**
+     * @ignore
+     */
+    public function __get(string $key)
+    {
+        switch( $key ) {
+        case 'id':
+            return (int) $this->_data[$key];
+
+        case 'type':
+        case 'name':
+        case 'prompt':
+            return (string) $this->_data[$key];
+
+        case 'value':
+            return $this->_data[$key];
+
+        case 'attribs':
+            return (array) $this->_data[$key];
+
+        default:
+            throw new \LogicException("$key is not a readble property of ".__CLASS__);
+        }
+    }
+
+    /**
+     * @ignore
+     */
+    public function __set(string $key, $val)
+    {
+        throw new \LogicException("$key is not a settable property of ".__CLASS__);
+    }
+
+    /**
+     * Set a name into a content block.
+     * There is no validation to the content of the string provided.
+     *
+     * @param string $name the new content blockn name.
+     * @return ContentBlock The new content block.
+     */
+    public function with_name(string $name) : self
+    {
+        $name = trim($name);
+        if( !$name ) throw new \InvalidArgumentException("Invalid name passed to ".__METHOD__);
+
+        $obj = clone $this;
+        $obj->_data['name'] = $name;
+        return $obj;
+    }
+
+    /**
+     * Set the type of a content block.
+     *
+     * @param string $type A valid type name
+     * @return ContentBlock the new content block
+     */
+    public function with_type(string $type) : self
+    {
+        if( !in_array($type,self::types) ) throw new \InvalidArgumentException('Invalid type passed to '.__METHOD__);
+
+        $obj = clone $this;
+        $obj->_data['type'] = $type;
+        return $obj;
+    }
+
+    /**
+     * Set the prompt for a content block
+     *
+     * @param string $prompt A non empty prompts.
+     * @return ContentBlock the new content block
+     */
+    public function with_prompt(string $prompt) : self
+    {
+        $obj = clone $this;
+        $obj->_data['prompt'] = $prompt;
+        return $obj;
+    }
+
+    /**
+     * Set the defalt value for a content block
+     *
+     * @param string $value
+     * @return ContentBlock the new content block
+     */
+    public function with_value(string $value) : self
+    {
+        $obj = clone $this;
+        $obj->_data['value'] = $value;
+        return $obj;
+    }
+
+    /**
+     * Set a content block attribute
+     *
+     * @param string $key The atrribute key
+     * @param mixed $val A value for the attribute.  If the value is null, then the attribute is unset.  Otherwise it is copied without validation.
+     * @return ContentBlock
+     */
+    public function with_attrib(string $key, $val) : self
+    {
+        $key = trim($key);
+        if( !$key ) throw new \InvalidArgumentException("Invalid name passed to ".__METHOD__);
+
+        $obj = clone $this;
+        if( is_null($val) ) {
+            if( isset($obj->_data['attribs'][$key]) ) unset($obj->_data['attribs'][$key]);
+        }
+        else {
+            $obj->_data['attribs'][$key] = $val;
+        }
+        return $obj;
+    }
+
+    /**
+     * @internal
+     */
+    public static function from_array(array $in) : self
+    {
+        if( !isset($in['type']) || !in_array($in['type'], self::types) ) throw new \InvalidArgumentException('Invalid input passed to '.__METHOD__);
+        //if( !isset($in['name']) || !$in['name'] ) throw new \InvalidArgumentException('Invalid input passed to '.__METHOD__);
+
+        $obj = new self;
+        foreach($in as $key => $val) {
+            switch( $key ) {
+            case 'id':
+                $val = (int) $val;
+                if( $val < 1 ) throw new \InvalidArgumentException('Invalid id passed to '.__METHOD__);
+                $obj->_data[$key] = $val;
+                break;
+
+            case 'name':
+            case 'type':
+            case 'prompt':
+            case 'value':
+                $obj->_data[$key] = trim($val);
+                break;
+
+            case 'attribs':
+                if( is_string($val) ) {
+                    $obj->_data[$key] = json_decode($val,TRUE);
+                    if( !is_array($obj->_data[$key]) ) $obj->_data[$key] = unserialize($val);
+                    if( !cge_array::is_hash($obj->_data[$key]) ) throw new \InvalidArgumentException('invalid attribs passed to '.__METHOD__);
+                }
+                else if( cge_array::is_hash($val) ) {
+                    $obj->_data[$key] = $val;
+                }
+                break;
+            }
+        }
+        return $obj;
+    }
+
+} // class
+

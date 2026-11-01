@@ -1,0 +1,614 @@
+<?php
+#BEGIN_LICENSE
+#-------------------------------------------------------------------------
+# Module: CGContentUtils (c) 2009-2014 by Robert Campbell
+#         (calguy1000@cmsmadesimple.org)
+#  An addon module for CMS Made Simple to provide various additional utilities
+#  for dealing with content pages.
+#
+#-------------------------------------------------------------------------
+# CMS - CMS Made Simple is (c) 2005 by Ted Kulp (wishy@cmsmadesimple.org)
+# This projects homepage is: http://www.cmsmadesimple.org
+#
+#-------------------------------------------------------------------------
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# However, as a special exception to the GPL, this software is distributed
+# as an addon module to CMS Made Simple.  You may not use this software
+# in any Non GPL version of CMS Made simple, or in any version of CMS
+# Made simple that does not indicate clearly and obviously in its admin
+# section that the site was built with CMS Made simple.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+# Or read it online: http://www.gnu.org/licenses/licenses.html#GPL
+#
+#-------------------------------------------------------------------------
+#END_LICENSE
+
+/**
+ * CGContentUtils module
+ *
+ * @package CGContentUtils
+ * @author  calguy1000 <calguy1000@cmsmadesimple.org>
+ * @copyright Copyright 2019 by Robert Campbell
+ * @license GPL2
+ */
+declare(strict_types=1);
+use CGContentUtils\contentImporter;
+use CGContentUtils\contentExporter;
+use CGContentUtils\templateCache;
+use CGContentUtils\IBlockManagerDecorator;
+use CGContentUtils\BlockManager;
+use CGContentUtils\ContentBlock;
+use CGContentUtils\BlockManagerCacheDecorator;
+define('CGCONTENTMAGIC_DTD_VERSION','1.0');
+
+/**
+ * The CGContentUtils module API
+ *
+ * @package CGContentUtils
+ */
+class CGContentUtils extends CGExtensions
+{
+    /**
+     * @ignore
+     */
+    var $_dom;
+
+    /**
+     * @ignore
+     */
+    var $_template_cache;
+
+    /**
+     * @ignore
+     */
+    var $_default_template;
+
+    /**
+     * @ignore
+     */
+    public function InitializeAdmin()
+    {
+        parent::InitializeAdmin();
+        if( $this->CheckPermission('Manage All Content') ) {
+            $this->RegisterBulkContentFunction($this->Lang('advanced_copy'),'admin_copycontent');
+            $this->RegisterBulkContentFunction($this->Lang('realias'),'admin_bulkrealias');
+        }
+    }
+
+    /**
+     * @ignore
+     */
+    function GetName() { return 'CGContentUtils'; }
+
+    /**
+     * @ignore
+     */
+    function GetVersion() { return '2.5.5'; }
+
+    /**
+     * @ignore
+     */
+    function IsPluginModule() { return false; }
+
+    /**
+     * @ignore
+     */
+    function HasAdmin() { return true; }
+
+    /**
+     * @ignore
+     */
+    function IsAdminOnly() { return false; }
+
+    /**
+     * @ignore
+     */
+    function GetAdminDescription() { return $this->Lang('moddescription'); }
+
+    /**
+     * @ignore
+     */
+    function GetDependencies() { return array('CGExtensions'=>'1.63','CGSimpleSmarty'=>'2.2.1'); }
+
+    /**
+     * @ignore
+     */
+    function MinimumCMSVersion() { return '2.2.9'; }
+
+    /**
+     * @ignore
+     */
+    function InstallPostMessage() { return $this->Lang('postinstall'); }
+
+    /**
+     * @ignore
+     */
+    function UninstallPostMessage() { return $this->Lang('postuninstall'); }
+
+    /**
+     * @ignore
+     */
+    function UninstallPreMessage() { return $this->Lang('ask_really_uninstall'); }
+
+    /**
+     * @ignore
+     */
+    function VisibleToAdminUser()
+    {
+        return( $this->CheckPermission('Modify Any Page') || $this->CheckPermission('Manage All Content') ||
+                $this->CheckPermission('Modify Templates') || $this->CheckPermission('Modify User-defined Tags') ||
+                $this->CheckPermission('Modify Global Content Blocks') );
+    }
+
+    /**
+     * @ignore
+     */
+    public function SetParameters()
+    {
+        $smarty = $this->cms->GetSmarty();
+        if( !$smarty ) return;
+
+        $contentops = $this->cms->GetContentOperations();
+        $obj = new CmsContentTypePlaceholder();
+        $obj->class = 'CGContentUtils\TimeLimitedPage';
+        $obj->type = 'cgcu_timelimited_page';
+        $obj->filename = __DIR__.'/lib/class.TimeLimitedPage.php';
+        $obj->loaded = false;
+        $obj->friendlyname = $this->Lang('timelimited_page_type');
+        $contentops->register_content_type($obj);
+    }
+
+    /**
+     * @ignore
+     */
+    protected function templateCache() : templateCache
+    {
+        static $obj;
+        if( !$obj ) $obj = new templateCache();
+        return $obj;
+    }
+
+    /**
+     * @ignore
+     */
+    protected function blockManager() : IBlockManagerDecorator
+    {
+        static $obj;
+        if( !$obj ) {
+            $obj = new BlockManager($this->GetDb());
+            $driver = new cms_filecache_driver(['lifetime'=>7*24*3600]);
+            $obj = new BlockManagerCacheDecorator($obj, $driver);
+        }
+        return $obj;
+    }
+
+    /**
+     * @ignore
+     */
+    protected function createImporter(int $dflt_template_id, int $owner_id = null) : contentImporter
+    {
+        if( $owner_id < 1 ) $owner_id = get_userid(FALSE);
+        if( $dflt_template_id < 1 ) throw new \InvalidArgumentException('Invalid dflt_template_id passed to '.__METHOD__);
+
+        return new contentImporter($this->cms->GetContentOperations(), $this->templateCache(), $dflt_template_id, $owner_id);
+    }
+
+    /**
+     * @ignore
+     */
+    protected function createExporter() : contentExporter
+    {
+        return new contentExporter($this->cms->GetHierarchyManager(), $this->templateCache());
+    }
+
+    /**
+     * @ignore
+     */
+    protected function _getDefaultTemplateId()
+    {
+        if( !$this->_default_template ) {
+            $tpl_type = CmsLayoutTemplateType::load('Core::Page');
+            $tpl = $tpl_type->get_dflt_template();
+            if( !$tpl ) return;
+            $this->_default_template = $tpl->get_id();
+        }
+        return $this->_default_template;
+    }
+
+    /**
+     * @ignore
+     */
+    function HasCapability($capability,$params = array())
+    {
+        switch( $capability ) {
+        case 'contentblocks':
+            return TRUE;
+        case 'bulkcontentoption':
+            return TRUE;
+        }
+        return FALSE;
+    }
+
+    /**
+     * @ignore
+     */
+    private function _prepare_options($input,$delim = '|')
+    {
+        $smarty = \CmsApp::get_instance()->GetSmarty();
+        $txt = strip_tags($smarty->fetch('string:'.$input));
+        return $this->_clean_options($txt,$delim);
+    }
+
+    /**
+     * @ignore
+     */
+    private function _clean_options($input,$delim = '|')
+    {
+        $opts = array();
+        $tmp = explode("\n",$input);
+        foreach( $tmp as $one ) {
+            $one = trim($one);
+            if( !$one ) continue;
+            if( strpos($one,$delim) === FALSE ) $one = $one.$delim.$one;
+            list($val,$lbl) = explode($delim,$one,2);
+            $val = trim($val);
+            $lbl = trim($lbl);
+            if( !strlen($val) && $lbl ) $val = $lbl;
+            if( $val && !strlen($lbl) ) $lbl = $val;
+            $val = cms_htmlentities($val);
+            $lbl = cms_htmlentities($lbl);
+            $opts[$val] = $lbl;
+        }
+        return $opts;
+    }
+
+    /**
+     * @ignore
+     */
+    public function GetContentBlockFieldInput($blockName,$value,$params,$adding,ContentBase $content_obj)
+    {
+        $db = $this->GetDb();
+        $config = $this->GetConfig();
+        $adding = ($adding || $content_obj->Id() < 1) ? TRUE : FALSE; // hack for the core.
+
+        if( empty($blockName) ) return FALSE;
+        $name = cge_param::get_string($params,'name', $blockName);
+
+        if( isset($params['groups']) && !$this->CheckPermission('Manage All Content')) {
+            // manage all content is just that... manage everything.
+            // groups are specified, and we don't get superuser privilege.
+            $my_uid = get_userid(FALSE);
+            if( $my_uid <= 0 ) return FALSE; // not loggedin?
+
+            $allgroups = array();
+            {
+                // get a hash of all of the groups and ids.
+                $tmp = $this->cms->GetGroupOperations()->LoadGroups();
+                if( !is_array($tmp) || count($tmp) == 0 ) return FALSE; // no groups?
+                foreach( $tmp as $one ) {
+                    if( !$one->active ) continue;
+                    $allgroups[$one->name] = $one->id;
+                }
+            }
+
+            // get the gids of all of the groups that this field is visible to.
+            $groups = array();
+            $tmp = explode(',',$params['groups']);
+            foreach( $tmp as $one ) {
+                $one = trim($one);
+                if( $one ) {
+                    if( !isset($allgroups[$one]) ) continue;
+                    $groups[] = $allgroups[$one];
+                }
+            }
+
+            if( count($groups) == 0 ) {
+                // no valid groups specified... user has to be an administrator
+                $groups[] = 1;
+            }
+
+            // now do the check to see if the current user is a member of the specified group(s)
+            $groups = array_unique($groups);
+            $valid = FALSE;
+            foreach( $groups as $gid ) {
+                $users = $this->cms->GetUserOperations()->LoadUsersInGroup($gid);
+                if( !is_array($users) || !count($users) ) continue;
+                foreach( $users as $user ) {
+                    if( $user->id == $my_uid ) {
+                        $valid = TRUE;
+                        break;
+                    }
+                }
+                if( $valid ) break;
+            }
+            if( !$valid ) {
+                // user is not a member of any of the specified groups
+                return FALSE;
+            }
+        }
+
+        $block = $this->blockManager()->load_by_name($name);
+        if( !$block ) return FALSE;
+
+        // for adding situations, if we do not have a value, but have one in the field definition... use it.
+        if( $adding && !$value ) $value = $block->value;
+
+        $lbl = $block->prompt;
+        if( $lbl == $name ) {
+            $tmp = $this->Lang($lbl);
+            if( strpos($tmp,'Languagestring:') === FALSE ) $lbl = $tmp;
+        }
+
+        if( cge_param::get_bool($params,'required') && !startswith($lbl,'*') ) $lbl = '*'.$lbl;
+        $txt = '';
+        $attribs = $block->attribs;
+
+        switch( $block->type ) {
+        case 'textinput':
+            $tmp = '<input type="text" name="%s" size="%d" maxlength="%d" value="%s"/>';
+            $value = cms_htmlentities($value);
+            $txt = sprintf($tmp,$blockName,$attribs['length'],$attribs['maxlength'], $value);
+            break;
+
+        case 'number':
+            $tmp = '<input type="number" name="%s" min="%s" max="%s" step="%s" value="%s"/>';
+            $value = cms_htmlentities($value);
+            $txt = sprintf($tmp,$blockName,$attribs['min'], $attribs['max'], $attribs['step'], $attribs['value']);
+            break;
+
+        case 'date':
+            $tmp = '<input type="date" name="%s" min="%s" max="%s" value="%s"/>';
+            $value = cms_htmlentities($value);
+            $txt = sprintf($tmp,$blockName,$attribs['min'], $attribs['max'], $attribs['value']);
+            break;
+
+        case 'textarea':
+            if( $attribs['wysiwyg'] ) {
+                $txt = create_textarea(TRUE, $value, $blockName,'',$blockName,'','',$attribs['cols'],$attribs['rows']);
+            }
+            else {
+                $tmp = '<textarea name="%s" rows="%d" cols="%d">%s</textarea>';
+                $txt = sprintf($tmp,$blockName,$attribs['rows'],$attribs['cols'], $value);
+            }
+            break;
+
+        case 'statictext':
+            $txt = $this->ProcessTemplateFromData(html_entity_decode($attribs['fieldtext']));
+            $txt = nl2br(strip_tags($txt));
+            break;
+
+        case 'pageselector':
+            $contentops = $this->cms->GetContentOperations();
+            $txt = $contentops->CreateHierarchyDropdown('',$value,$blockName,1,1);
+            break;
+
+        case 'advpageselector':
+            $start = $attribs['adv_start'];
+            $navhidden = $attribs['adv_navhidden'];
+            $obj = new \CGExtensions\content_list_builder(array('parent'=>$start,'show_navhidden'=>$navhidden,'current'=>$value));
+            $txt = sprintf('<select name="%s">',$blockName).$obj->get_options().'</select>';
+            break;
+
+        case 'dropdown':
+            // get the options
+            $opts = $this->_prepare_options($attribs['options']);
+            // build the field.
+            $txt = $this->CreateInputDropdown('',$blockName,$opts,-1,$value);
+            break;
+
+        case 'sortable_list':
+            // get the ptions
+            $opts = $this->_prepare_options($attribs['options']);
+            $txt = $this->CreateSortableListArea('',$blockName,array_flip($opts),$value,true,
+                                                 (int)$attribs['sortable_maxitems'],'sortable_list.tpl');
+            break;
+
+        case 'dropdown_udt':
+            // get the options
+            $parms = array();
+            $opts = null;
+            if( version_compare(CMS_VERSION,'2.2.99') < 0 ) {
+                $opts = UserTagOperations::get_instance()->CallUserTag($attribs['udt'],$parms);
+            }
+            else {
+                $ops = $this->cms->GetSimplePluginOperations();
+                $opts = $ops->call_plugin($attribs['uid'],$parms);
+            }
+            if( is_array($opts) && count($opts) ) {
+                $opts = array_flip($opts);
+                $txt = $this->CreateInputDropdown('',$blockName,$opts,-1,$value);
+            }
+            else if( is_string($opts) && startswith( $opts, '<option') ) {
+                $txt = '<select name="'.$blockName.'">'.$opts.'</select>';
+            }
+            break;
+
+        case 'multiselect':
+            // get the options
+            $delim = get_parameter_value($attribs,'storagedelimiter',',');
+	    if( !is_null($value) ) $value = explode($delim,$value);
+            $opts = $this->_prepare_options($attribs['options']);
+
+            // build the field.
+            $size = max(3,min(10,count($opts)));
+            $txt = $this->CreateInputSelectList('',$blockName.'[]',$opts,$value,$size);
+            break;
+
+        case 'checkbox':
+            $txt = $this->CreateInputHidden('',$blockName,'') . $this->CreateInputCheckbox('',$blockName,$attribs['value'],$value);
+            break;
+
+        case 'radiobuttons':
+            // get the options.
+            $tmp = explode("\n",$attribs['options']);
+            $opts = array();
+            for( $i = 0; $i < count($tmp); $i++ ) {
+                if(empty($tmp[$i])) continue;
+                $tmp2 = explode('|',trim($tmp[$i]),2);
+                if( is_array($tmp2) && count($tmp2) == 2 ) {
+                    $opts[$tmp2[0]] = $tmp2[1];
+                }
+                else {
+                    $opts[$tmp2[0]] = $tmp2[0];
+                }
+            }
+
+            // build the field.
+            $txt = $this->CreateInputRadioGroup('',$blockName,$opts,$value,'','<br/>');
+            break;
+
+        case 'gcb_selector':
+            // this is deprecated
+            // get the generic template type id
+            $type = CmsLayoutTemplateType::load('Core::Generic');
+            $type_id = $type->get_id();
+            unset($type);
+            // build a CmsLayoutTemplateQuery for generic temlates that have the prefix
+            $query = new CmsLayoutTemplateQuery("t:$type_id");
+            $list = array();
+            $prefix = null;
+            if( isset($attribs['gcb_prefix']) ) $prefix = $attribs['gcb_prefix'];
+            while( $query && !$query->EOF() ) {
+                $obj = $query->GetObject();
+	        if( !$obj ) continue;
+                $str = $obj->get_name();
+                if( startswith($str,$prefix) ) $list[$obj->get_name()] = substr($str,strlen($prefix));
+                $query->MoveNext();
+            }
+            unset($query);
+            // build the field
+            $txt = $this->CreateInputDropdown('',$blockName,array_flip($list),-1,$value);
+            break;
+
+        case 'file_selector':
+            // 1.  Get the directory contents
+            $dir = cms_join_path($config['uploads_path'],$attribs['dir']);
+            $filetypes = $attribs['filetypes'];
+            if( $filetypes != '' ) {
+                $filetypes = explode(',',$filetypes);
+                for( $i = 0; $i < count($filetypes); $i++ ) {
+                    $filetypes[$i] = '*.'.$filetypes[$i];
+                }
+            }
+            $excludes = $attribs['excludeprefix'];
+            if( $excludes != '' ) {
+                $excludes = explode(',',$excludes);
+                for( $i = 0; $i < count($excludes); $i++ ) {
+                    $excludes[$i] = $excludes[$i].'*';
+                }
+            }
+            $fl = cge_dir::recursive_glob($dir,$filetypes,'FILES',$excludes, ($attribs['recurse']) ? -1 : 0);
+
+            // 2.  Remove prefix
+            for( $i = 0; $i < count($fl); $i++ ) {
+                $fl[$i] = str_replace($dir,'',$fl[$i]);
+            }
+
+            // 2.  Sort
+            if( is_array($fl) && $attribs['sortfiles'] ) sort($fl);
+
+            $opts = array();
+            $opts[$this->Lang('none')] = -1;
+            $url_prefix = $config['uploads_url'].'/'.$attribs['dir'];
+            for( $i = 0; $i < count($fl); $i++ ) {
+                $opts[$fl[$i]] = $url_prefix.$fl[$i];
+            }
+            $txt = $this->CreateInputDropdown('',$blockName,$opts,-1,$value);
+            break;
+
+        default:
+            return FALSE;
+        }
+
+        if( $lbl && $txt ) return array($lbl,$txt);
+        if( $txt ) return $txt;
+    }
+
+    /**
+     * @ignore
+     */
+    public function GetContentBlockFieldValue($blockName,$blockParams,$inputParams,ContentBase $content_obj)
+    {
+        $block = $this->blockManager()->load_by_name($blockName);
+        if( !$block ) return FALSE;
+        $attribs = $block->attribs;
+
+        switch( $block->type ) {
+        case 'radiobuttons':
+        case 'dropdown':
+        case 'multiselect':
+            $delim = trim(get_parameter_value($attribs,'storagedelimiter'));
+            if( !$delim ) $delim = ',';
+            $value = array();
+            if( isset($inputParams[$blockName]) ) {
+                $val = $inputParams[$blockName];
+                if( is_array($val) ) $value = implode($delim,$inputParams[$blockName]);
+            }
+            return $value;
+            break;
+
+        case 'statictext':
+            // static text never gets rendered.
+            return '';
+
+        default:
+            if( isset($inputParams[$blockName]) ) return $inputParams[$blockName];
+            break;
+        }
+    }
+
+    /**
+     * @ignore
+     */
+    public function ValidateContentBlockFieldValue($blockName,$value,$blockparams,ContentBase $content_obj)
+    {
+        $block = $this->blockManager()->load_by_name($blockName);
+        if( !$block ) return FALSE;
+
+        if( cge_param::get_bool($blockparams,'required') && empty($value) ) {
+            return lang('nofieldgiven',array($blockName));
+        }
+    }
+
+    /**
+     * Create an empty content block object.
+     *
+     * @return ContentBlock
+     */
+    public function create_empty_contentblock() : ContentBlock
+    {
+        return $this->blockManager()->create_new_block();
+    }
+
+    /**
+     * Store a new content block.
+     * This method allows only creating a content block, it does not allow updating an existing content block.
+     * If valid options are passed in, this method will create and save the content block option, and return void.
+     * It will throw an exception if the block already exists or if the block object is somehow invalid.
+     *
+     * @see CGContentUtils::create_empty_contentblock()
+     * @param ContentBlock $block The content block to add.
+     */
+    public function addContentBlock(ContentBlock $block)
+    {
+        try {
+            if( $block->id > 0 ) throw new \InvalidArgumentException('foo');
+            $this->blockManager()->save($block);
+        }
+        catch( \InvalidArgumentException $e ) {
+            throw new \InvalidArgumentException('Invalid block passed to '.__METHOD__);
+        }
+    }
+} // end of class

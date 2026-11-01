@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<phpdocumentor>
+  <title><![CDATA[CGContentUtils for #cmsms by calguy1000]]></title>
+  <parser>
+    <target>/tmp/CGContentUtils.x</target>
+  </parser>
+  <transformer>
+    <target>doc/apidoc</target>
+  </transformer>
+  <files>
+    <file>CGContentUtils.module.php</file>
+    <file>lib/class.ContentBlock.php</file>
+  </files>
+</phpdocumentor>
